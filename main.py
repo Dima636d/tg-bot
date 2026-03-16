@@ -89,6 +89,10 @@ ADMIN_HTML = """
 </html>
 """
 
+@app.route('/')
+def home():
+    return redirect(url_for('login'))
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST' and request.form.get('password') == ADMIN_PASSWORD:
@@ -100,12 +104,10 @@ def login():
 def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
     tab = request.args.get('tab', 'all')
-    
-    # Оновлюємо дані з файлу перед показом
     current_logs, current_users = load_db()
     
     if tab == 'all':
-        filtered = current_logs # ТУТ ТЕПЕР БУДЕ ВСЕ
+        filtered = current_logs
     elif tab == 'pred':
         filtered = [l for l in current_logs if l.get('type') == 'pred']
     elif tab == 'teh':
@@ -120,12 +122,12 @@ def delete_one(log_id):
         current_logs, current_users = load_db()
         new_logs = [l for l in current_logs if l['id'] != log_id]
         save_db(new_logs, current_users)
-    return redirect(request.referrer)
+    return redirect(request.referrer or url_for('admin'))
 
 @app.route('/broadcast', methods=['POST'])
 def broadcast():
     if session.get('logged_in'):
-        current_logs, current_users = load_db()
+        _, current_users = load_db()
         text = request.form.get('news_text')
         for u_id in current_users:
             try: bot.send_message(u_id, f"📢 <b>НОВОСТИ:</b>\n\n{text}", parse_mode='HTML')
@@ -133,50 +135,55 @@ def broadcast():
     return redirect(url_for('admin', tab='news'))
 
 @app.route('/logout')
-def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
 
 @bot.message_handler(func=lambda m: True)
 def track(m):
     current_logs, current_users = load_db()
-    if m.chat.id not in current_users: current_users.append(m.chat.id)
+    if m.chat.id not in current_users:
+        current_users.append(m.chat.id)
     
     msg_type = 'log'
-    clean_text = m.text
-    
-    # 1. КОМАНДА START (Приветствие)
-    if m.text.startswith('/start'):
-        bot.send_message(m.chat.id, "Привет! Я официальный бот канала Dimoon и Createdet. Пиши свое сообщение, и возможно я на него отвечу!")
-        return # Останавливаем функцию, чтобы /start не шел в логи админки
+    clean_text = m.text or "[Медиа]"
 
-    # 2. КОМАНДА PRED (Предложения)
-    elif m.text.startswith('/pred'):
-        msg_type, clean_text = 'pred', m.text.replace('/pred', '').strip()
-        if not clean_text:
-            bot.reply_to(m, "❌ Напиши текст предложения после команды!")
-            return
-        bot.reply_to(m, "✅ Предложение отправлено!")
-
-    # 3. КОМАНДА TEH (Техподдержка)
-    elif m.text.startswith('/teh'):
-        msg_type, clean_text = 'teh', m.text.replace('/teh', '').strip()
-        if not clean_text:
-            bot.reply_to(m, "❌ Опиши свою проблему после команды!")
-            return
-        bot.reply_to(m, "🆘 Техподдержка приняла!")
-    
-    # 4. ОБЫЧНОЕ СООБЩЕНИЕ (Лог)
-    else:
-        msg_type = 'log'
-        clean_text = m.text
-
+    if m.text:
+        if m.text.startswith('/start'):
+            bot.send_message(m.chat.id, "Привет! Я официальный бот канала Dimoon и Createdet.")
+            save_db(current_logs, current_users)
+            return 
+        elif m.text.startswith('/pred'):
+            msg_type = 'pred'
+            clean_text = m.text.replace('/pred', '').strip()
+            if not clean_text:
+                bot.reply_to(m, "❌ Напиши текст предложения после команды!")
+                return
+            bot.reply_to(m, "✅ Предложение отправлено!")
+        elif m.text.startswith('/teh'):
+            msg_type = 'teh'
+            clean_text = m.text.replace('/teh', '').strip()
+            if not clean_text:
+                bot.reply_to(m, "❌ Опиши свою проблему после команды!")
+                return
+            bot.reply_to(m, "🆘 Техподдержка приняла!")
 
     current_logs.append({
-        "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
-        "user_id": m.chat.id, "username": m.from_user.username or "N/A",
-        "text": clean_text or "[Медиа]", "type": msg_type
+        "id": random.randint(100000, 999999), 
+        "time": datetime.now().strftime("%H:%M"),
+        "user_id": m.chat.id, 
+        "username": m.from_user.username or "N/A",
+        "text": clean_text, 
+        "type": msg_type
     })
     save_db(current_logs, current_users)
 
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
 if __name__ == "__main__":
-    Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
-    bot.infinity_polling()
+    # Запускаємо веб-панель у фоні
+    Thread(target=run_flask).start()
+    # Запускаємо бота (основний процес)
+    print("Бот запущен...")
+    bot.polling(none_stop=True)
