@@ -142,12 +142,33 @@ def track(m):
     
     msg_type = 'log'
     clean_text = m.text
-    if m.text.startswith('/pred'):
+    
+    # 1. КОМАНДА START (Приветствие)
+    if m.text.startswith('/start'):
+        bot.send_message(m.chat.id, "Привет! Я официальный бот канала Dimoon и Createdet. Пиши свое сообщение, и возможно я на него отвечу!")
+        return # Останавливаем функцию, чтобы /start не шел в логи админки
+
+    # 2. КОМАНДА PRED (Предложения)
+    elif m.text.startswith('/pred'):
         msg_type, clean_text = 'pred', m.text.replace('/pred', '').strip()
+        if not clean_text:
+            bot.reply_to(m, "❌ Напиши текст предложения после команды!")
+            return
         bot.reply_to(m, "✅ Предложение отправлено!")
+
+    # 3. КОМАНДА TEH (Техподдержка)
     elif m.text.startswith('/teh'):
         msg_type, clean_text = 'teh', m.text.replace('/teh', '').strip()
+        if not clean_text:
+            bot.reply_to(m, "❌ Опиши свою проблему после команды!")
+            return
         bot.reply_to(m, "🆘 Техподдержка приняла!")
+    
+    # 4. ОБЫЧНОЕ СООБЩЕНИЕ (Лог)
+    else:
+        msg_type = 'log'
+        clean_text = m.text
+
 
     current_logs.append({
         "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
