@@ -150,7 +150,13 @@ def track(m):
 
     if m.text:
         if m.text.startswith('/start'):
-            bot.send_message(m.chat.id, "Привет! Я официальный бот канала Dimoon и Createdet.")
+            welcome_text = (
+                "Привет! Я официальный бот канала **Dimoon** и **Createdet**. 🤝\n\n"
+                "Напиши нам что-нибудь, поделись идеей или задай вопрос — мы обязательно прочитаем и ответим! ✨"
+            )
+            bot.send_message(m.chat.id, welcome_text, parse_mode='Markdown')
+            
+            # Оновлюємо список користувачів (без запису тексту старту в логи)
             save_db(current_logs, current_users)
             return 
         elif m.text.startswith('/pred'):
@@ -173,17 +179,18 @@ def track(m):
         "time": datetime.now().strftime("%H:%M"),
         "user_id": m.chat.id, 
         "username": m.from_user.username or "N/A",
-        "text": clean_text, 
+               "text": clean_text, 
         "type": msg_type
     })
     save_db(current_logs, current_users)
 
+# --- ЗАПУСК ---
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
-    # Запускаємо веб-панель у фоні
+    # Запускаємо сайт у фоновому потоці
     Thread(target=run_flask).start()
-    # Запускаємо бота (основний процес)
-    print("Бот запущен...")
+    # Запускаємо бота
+    print("Бот працює...")
     bot.polling(none_stop=True)
