@@ -6,7 +6,7 @@ from datetime import datetime
 # --- НАЛАШТУВАННЯ ---
 TOKEN = os.environ.get('BOT_TOKEN')
 MONGO_URL = os.environ.get('MONGO_URL') 
-ADMIN_PASSWORD = "A131@Y&" # Пароль для входу в адмінку
+ADMIN_PASSWORD = "A131@Y&" 
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
@@ -106,20 +106,16 @@ def login():
 @app.route('/admin')
 def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
-    if client is None: return "❌ База даних не підключена. Перевір MONGO_URL на Render!"
-    
+    if client is None: return "❌ База даних не підключена."
     tab = request.args.get('tab', 'all')
     try:
         all_logs = list(logs_col.find({}, {'_id': 0}).sort('_id', -1).limit(100))
         user_count = users_col.count_documents({})
-        
         if tab == 'pred': filtered = [l for l in all_logs if l.get('type') == 'pred']
         elif tab == 'teh': filtered = [l for l in all_logs if l.get('type') == 'teh']
         else: filtered = all_logs
-        
         return render_template_string(ADMIN_HTML, logs=filtered, current_tab=tab, user_count=user_count)
-    except Exception as e:
-        return f"Помилка завантаження бази: {e}"
+    except Exception as e: return f"Ошибка: {e}"
 
 @app.route('/reply', methods=['POST'])
 def reply():
@@ -150,52 +146,32 @@ def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 def track(m):
     try:
         users_col.update_one({"user_id": m.chat.id}, {"$set": {"user_id": m.chat.id}}, upsert=True)
-        
-        # --- КОМАНДА START ---
         if m.text and m.text.startswith('/start'):
-            welcome = (
-                "Привет! Я официальный бот каналов **Dimoon** и **Createdet**. 🤝\n\n"
-                "Пиши нам что угодно!\n"
-                "Используй /help, чтобы увидеть список команд.\n\n"
-                "Основной канал: https://t.me/Dimooner1"
-            )
+            welcome = "Привет! Я официальный бот для **Dimoon** и **Createdet**. 🤝\nПиши что угодно!\n/help — список команд.\n основной тг: https://t.me/Dimooner1"
             bot.send_message(m.chat.id, welcome, parse_mode='Markdown')
             return
-
-        # --- КОМАНДА HELP ---
         elif m.text and m.text.startswith('/help'):
-            help_text = (
-                "🚀 **Доступные команды:**\n\n"
-                "📩 **Просто текст** — обычное сообщение в админку.\n"
-                "💡 `/pred [текст]` — предложить идею.\n"
-                "🆘 `/teh [текст]` — написать в техподдержку.\n"
-                "ℹ️ `/help` — помощь."
-            )
-            bot.send_message(m.chat.id, help_text, parse_mode='Markdown')
+            help_txt = "🚀 **Команды:**\n/pred [текст] — предложение\n/teh [текст] — поддержка"
+            bot.send_message(m.chat.id, help_txt, parse_mode='Markdown')
             return
 
         m_type, txt = 'log', m.text or "[Медиа]"
         if m.text:
             if m.text.startswith('/pred'): 
-                m_type, txt = 'pred', m.text.replace('/pred','').strip()
-                if not txt:
-                    bot.reply_to(m, "❌ Напиши текст предложения!")
-                    return
-                bot.reply_to(m, "✅ Предложение отправлено!")
+                m_type, txt = 'pred', m.text.replace('/pred','').strip() or "Пусто"
+                bot.reply_to(m, "✅ Принято!")
             elif m.text.startswith('/teh'): 
-                m_type, txt = 'teh', m.text.replace('/teh','').strip()
-                if not txt:
-                    bot.reply_to(m, "❌ Опиши свою проблему!")
-                    return
-                bot.reply_to(m, "🆘 Запрос принят!")
+                m_type, txt = 'teh', m.text.replace('/teh','').strip() or "Пусто"
+                bot.reply_to(m, "🆘 Ожидайте!")
 
         logs_col.insert_one({
             "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
             "user_id": m.chat.id, "username": m.from_user.username or "N/A",
             "text": txt, "type": m_type
         })
-    except Exception as e: print(f"Ошибка в боте: {e}")
+    except Exception as e: print(f"Ошибка бота: {e}")
 
 if __name__ == "__main__":
-    Thread(target=lambda: bot.infinity_polling(timeout=20), daemon=True).start()
+    # Запуск бота у фоновому потоці з таймаутом для уникнення 409 Conflict
+    Thread(target=lambda: bot.infinity_polling(timeout=20, long_polling_timeout=5), daemon=True).start()
     app.run(host='0.0.0.0', port=8080)
