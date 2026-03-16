@@ -8,7 +8,7 @@ TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_PASSWORD = "A131@Y&" 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'createdet_ultimate_final_v10'
+app.secret_key = 'createdet_ultimate_v12_final'
 
 DB_FILE = 'data.json'
 
@@ -22,8 +22,11 @@ def load_db():
     return [], []
 
 def save_db(logs, users):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump({"logs": logs, "users": list(users)}, f, ensure_ascii=False, indent=4)
+    try:
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"logs": logs, "users": list(set(users))}, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Ошибка базы: {e}")
 
 all_logs, users_list = load_db()
 
@@ -41,6 +44,7 @@ ADMIN_HTML = """
         .tab-btn { padding: 10px 20px; background: #30363d; color: #c9d1d9; text-decoration: none; border-radius: 6px; font-size: 0.9em; border: 1px solid transparent; }
         .tab-btn.active { background: #1f6feb; color: white; border-color: #58a6ff; }
         .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
+        .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; margin-bottom: 10px; display: inline-block; color: white; }
         .btn { border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; color: white; font-weight: bold; text-decoration: none; font-size: 0.85em; }
         .btn-red { background: #da3633; }
         .btn-green { background: #238636; }
@@ -53,8 +57,8 @@ ADMIN_HTML = """
         <div class="header">
             <h2 style="color: #58a6ff; margin:0;">🛠 Createdet Admin</h2>
             <div>
-                {% if current_tab == 'all' %}
-                <a href="/clear_all" class="btn btn-red">УДАЛИТЬ ВСЕ СООБЩЕНИЯ</a>
+                {% if current_tab != 'news' %}
+                <a href="/clear_tab?tab={{ current_tab }}" class="btn btn-red">ОЧИСТИТЬ ВКЛАДКУ</a>
                 {% endif %}
                 <a href="/logout" class="tab-btn" style="margin-left:10px;">Выход</a>
             </div>
@@ -62,20 +66,25 @@ ADMIN_HTML = """
 
         <div class="tabs">
             <a href="/admin?tab=all" class="tab-btn {% if current_tab == 'all' %}active{% endif %}">ЛОГИ</a>
+            <a href="/admin?tab=pred" class="tab-btn {% if current_tab == 'pred' %}active{% endif %}">ПРЕДЛОЖЕНИЯ</a>
+            <a href="/admin?tab=teh" class="tab-btn {% if current_tab == 'teh' %}active{% endif %}">ТЕХПОДДЕРЖКА</a>
             <a href="/admin?tab=news" class="tab-btn {% if current_tab == 'news' %}active{% endif %}">📢 НОВОСТИ</a>
         </div>
 
         {% if current_tab == 'news' %}
             <div class="card" style="text-align:center;">
-                <h3>Создать рассылку для всех ({{ user_count }} чел.)</h3>
+                <h3>Рассылка ({{ user_count }} чел.)</h3>
                 <form action="/broadcast" method="POST">
-                    <textarea name="news_text" placeholder="Введите текст новости..." required></textarea>
-                    <button type="submit" class="btn btn-green" style="width: 100%; margin-top: 15px; padding: 12px;">ОТПРАВИТЬ ВСЕМ</button>
+                    <textarea name="news_text" placeholder="Текст новости..." required></textarea>
+                    <button type="submit" class="btn btn-green" style="width: 100%; margin-top: 15px;">ОТПРАВИТЬ ВСЕМ</button>
                 </form>
             </div>
         {% else %}
             {% for log in logs %}
             <div class="card">
+                <div class="badge" style="background: {% if log.type == 'pred' %}#da3633{% elif log.type == 'teh' %}#f1e05a{% else %}#238636{% endif %}; color: {% if log.type == 'teh' %}black{% else %}white{% endif %};">
+                    {{ log.type | upper }}
+                </div>
                 <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username }} <small style="color:#8b949e">({{ log.time }})</small></div>
                 <div class="msg-box">{{ log.text }}</div>
                 
@@ -85,10 +94,10 @@ ADMIN_HTML = """
                     <button type="submit" class="btn btn-green">ОТВЕТИТЬ</button>
                 </form>
                 
-                <a href="/delete/{{ log.id }}" class="btn btn-red" style="position: absolute; top: 15px; right: 15px; padding: 4px 8px; font-size: 0.7em;">УДАЛИТЬ</a>
+                <a href="/delete/{{ log.id }}?tab={{ current_tab }}" class="btn btn-red" style="position: absolute; top: 15px; right: 15px; padding: 4px 8px; font-size: 0.7em;">УДАЛИТЬ</a>
             </div>
             {% else %}
-            <p style="text-align:center; color: #8b949e;">Сообщений пока нет...</p>
+            <p style="text-align:center; color: #8b949e;">Здесь пока пусто...</p>
             {% endfor %}
         {% endif %}
     </div>
@@ -109,13 +118,23 @@ def login():
 def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
     tab = request.args.get('tab', 'all')
-    return render_template_string(ADMIN_HTML, logs=reversed(all_logs), current_tab=tab, user_count=len(users_list))
+    
+    # Фільтрація по типах
+    if tab == 'all':
+        filtered = [l for l in all_logs if l.get('type') == 'log']
+    elif tab == 'pred':
+        filtered = [l for l in all_logs if l.get('type') == 'pred']
+    elif tab == 'teh':
+        filtered = [l for l in all_logs if l.get('type') == 'teh']
+    else: filtered = []
+        
+    return render_template_string(ADMIN_HTML, logs=reversed(filtered), current_tab=tab, user_count=len(users_list))
 
 @app.route('/reply', methods=['POST'])
 def reply():
     if session.get('logged_in'):
         uid, txt = request.form.get('user_id'), request.form.get('reply_text')
-        try: bot.send_message(uid, f"<b>📩 Ответ:</b>\n\n{txt}", parse_mode='HTML')
+        try: bot.send_message(uid, f"<b>📩 Ответ админа:</b>\n\n{txt}", parse_mode='HTML')
         except: pass
     return redirect(request.referrer)
 
@@ -136,13 +155,15 @@ def delete_one(log_id):
         save_db(all_logs, users_list)
     return redirect(request.referrer)
 
-@app.route('/clear_all')
-def clear_all():
+@app.route('/clear_tab')
+def clear_tab():
     if session.get('logged_in'):
+        tab = request.args.get('tab', 'all')
         global all_logs
-        all_logs = []
+        target_type = 'log' if tab == 'all' else tab
+        all_logs = [l for l in all_logs if l.get('type') != target_type]
         save_db(all_logs, users_list)
-    return redirect(url_for('admin', tab='all'))
+    return redirect(url_for('admin', tab=tab))
 
 @app.route('/logout')
 def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
@@ -150,14 +171,28 @@ def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 # --- БОТ ---
 @bot.message_handler(func=lambda m: True)
 def track(m):
-    if m.chat.id not in users_list: 
-        users_list.append(m.chat.id)
+    global all_logs, users_list
+    if m.chat.id not in users_list: users_list.append(m.chat.id)
+    
+    msg_type = 'log'
+    clean_text = m.text
+    
+    if m.text.startswith('/pred'):
+        msg_type = 'pred'
+        clean_text = m.text.replace('/pred', '').strip()
+        bot.reply_to(m, "✅ Предложение отправлено!")
+    elif m.text.startswith('/teh'):
+        msg_type = 'teh'
+        clean_text = m.text.replace('/teh', '').strip()
+        bot.reply_to(m, "🆘 Запрос в поддержку принят!")
+
     all_logs.append({
         "id": random.randint(100000, 999999),
         "time": datetime.now().strftime("%H:%M"),
         "user_id": m.chat.id,
         "username": m.from_user.username or "N/A",
-        "text": m.text or "[Медиа]"
+        "text": clean_text or "[Медиа]",
+        "type": msg_type
     })
     save_db(all_logs, users_list)
 
