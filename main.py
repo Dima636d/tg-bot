@@ -3,23 +3,26 @@ from flask import Flask, render_template_string, request, session, redirect, url
 from threading import Thread
 from datetime import datetime
 
-# --- НАСТРОЙКИ ---
+# --- НАЛАШТУВАННЯ ---
 TOKEN = os.environ.get('BOT_TOKEN')
 MONGO_URL = os.environ.get('MONGO_URL') 
-ADMIN_PASSWORD = "A131@Y&" # Твой пароль
+ADMIN_PASSWORD = "A131@Y&" # Пароль для входу в адмінку
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'createdet_final_v21'
+app.secret_key = 'createdet_ultra_final_v25'
 
-# Подключение к MongoDB Atlas
+# Підключення до MongoDB Atlas
 try:
     client = pymongo.MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
     db = client['bot_database']
     logs_col = db['logs']
     users_col = db['users']
-    print("✅ База данных подключена успешно!")
+    client.admin.command('ping')
+    print("✅ Успішно підключено до MongoDB Atlas!")
 except Exception as e:
-    print(f"❌ Ошибка подключения к базе: {e}")
+    print(f"❌ Помилка бази: {e}")
+    client = None
 
 # --- HTML ШАБЛОН ---
 ADMIN_HTML = """
@@ -98,15 +101,15 @@ def login():
     if request.method == 'POST' and request.form.get('password') == ADMIN_PASSWORD:
         session['logged_in'] = True
         return redirect(url_for('admin'))
-    return '<body style="background:#0d1117;color:white;text-align:center;padding-top:100px;"><form method="POST"><h2>ADMIN PASS</h2><input type="password" name="password"><button type="submit">GO</button></form></body>'
+    return '<body style="background:#0d1117;color:white;text-align:center;padding-top:100px;font-family:sans-serif;"><form method="POST"><h2>ADMIN PASS</h2><input type="password" name="password"><button type="submit">GO</button></form></body>'
 
 @app.route('/admin')
 def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
-    tab = request.args.get('tab', 'all')
+    if client is None: return "❌ База даних не підключена. Перевір MONGO_URL на Render!"
     
+    tab = request.args.get('tab', 'all')
     try:
-        # Лимит 100 последних логов, чтобы сайт не тормозил
         all_logs = list(logs_col.find({}, {'_id': 0}).sort('_id', -1).limit(100))
         user_count = users_col.count_documents({})
         
@@ -116,13 +119,12 @@ def admin():
         
         return render_template_string(ADMIN_HTML, logs=filtered, current_tab=tab, user_count=user_count)
     except Exception as e:
-        return f"Ошибка БД: {e}"
+        return f"Помилка завантаження бази: {e}"
 
 @app.route('/reply', methods=['POST'])
 def reply():
     if session.get('logged_in'):
-        u_id = request.form.get('user_id')
-        text = request.form.get('reply_text')
+        u_id, text = request.form.get('user_id'), request.form.get('reply_text')
         try: bot.send_message(u_id, f"✉️ **Ответ администрации:**\n\n{text}", parse_mode='Markdown')
         except: pass
     return redirect(url_for('admin', tab=request.form.get('tab', 'all')))
@@ -137,7 +139,7 @@ def broadcast():
     if session.get('logged_in'):
         text = request.form.get('news_text')
         for u in users_col.find():
-            try: bot.send_message(u['user_id'], f"📢 <b>НОВОСТИ:</b>\n\n{text}", parse_mode='HTML')
+            try: bot.send_message(u['user_id'], f"📢 **НОВОСТИ:**\n\n{text}", parse_mode='Markdown')
             except: pass
     return redirect(url_for('admin', tab='news'))
 
@@ -146,31 +148,34 @@ def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 
 @bot.message_handler(func=lambda m: True)
 def track(m):
-    # Сохраняем юзера
-    users_col.update_one({"user_id": m.chat.id}, {"$set": {"user_id": m.chat.id}}, upsert=True)
-    
-    if m.text and m.text.startswith('/start'):
-        bot.send_message(m.chat.id, "Привет! Я бот канала **Createdet**. 🤝", parse_mode='Markdown')
-        return
+    try:
+        users_col.update_one({"user_id": m.chat.id}, {"$set": {"user_id": m.chat.id}}, upsert=True)
+        
+        if m.text and m.text.startswith('/start'):
+            welcome = (
+                "Привет! Я официальный бот каналов **Dimoon** и **Createdet**. 🤝\n\n"
+                "Пиши нам что угодно!\n"
+                "Основной канал: https://t.me"
+            )
+            bot.send_message(m.chat.id, welcome, parse_mode='Markdown', disable_web_page_preview=False)
+            return
 
-    m_type, txt = 'log', m.text or "[Медиа]"
-    if m.text:
-        if m.text.startswith('/pred'): m_type, txt = 'pred', m.text.replace('/pred','').strip()
-        elif m.text.startswith('/teh'): m_type, txt = 'teh', m.text.replace('/teh','').strip()
+        m_type, txt = 'log', m.text or "[Медиа]"
+        if m.text:
+            if m.text.startswith('/pred'): 
+                m_type, txt = 'pred', m.text.replace('/pred','').strip() or "Пусте"
+                bot.reply_to(m, "✅ Твоё предложение отправлено!")
+            elif m.text.startswith('/teh'): 
+                m_type, txt = 'teh', m.text.replace('/teh','').strip() or "Пусте"
+                bot.reply_to(m, "🆘 Запрос в поддержку принят!")
 
-    logs_col.insert_one({
-        "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
-        "user_id": m.chat.id, "username": m.from_user.username or "N/A",
-        "text": txt, "type": m_type
-    })
-
-def run_bot():
-    print("🤖 Бот запускается...")
-    bot.polling(none_stop=True, interval=1)
+        logs_col.insert_one({
+            "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
+            "user_id": m.chat.id, "username": m.from_user.username or "N/A",
+            "text": txt, "type": m_type
+        })
+    except Exception as e: print(f"Помилка в боті: {e}")
 
 if __name__ == "__main__":
-    # Запускаем бота в фоне
-    Thread(target=run_bot, daemon=True).start()
-    # Запускаем Flask в главном потоке
-    print("🌐 Админка готова!")
+    Thread(target=lambda: bot.infinity_polling(timeout=20), daemon=True).start()
     app.run(host='0.0.0.0', port=8080)
