@@ -10,7 +10,7 @@ ADMIN_PASSWORD = "A131@Y&" # Пароль для входу в адмінку
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'createdet_ultra_final_v25'
+app.secret_key = 'createdet_ultra_final_v26'
 
 # Підключення до MongoDB Atlas
 try:
@@ -151,33 +151,51 @@ def track(m):
     try:
         users_col.update_one({"user_id": m.chat.id}, {"$set": {"user_id": m.chat.id}}, upsert=True)
         
+        # --- КОМАНДА START ---
         if m.text and m.text.startswith('/start'):
             welcome = (
                 "Привет! Я официальный бот каналов **Dimoon** и **Createdet**. 🤝\n\n"
                 "Пиши нам что угодно!\n"
-                "Основной канал: https://t.me/Dimooner1"
+                "Используй /help, чтобы увидеть список команд.\n\n"
+                "Основной канал: https://t.me"
             )
-            bot.send_message(m.chat.id, welcome, parse_mode='Markdown', disable_web_page_preview=False)
+            bot.send_message(m.chat.id, welcome, parse_mode='Markdown')
+            return
+
+        # --- КОМАНДА HELP ---
+        elif m.text and m.text.startswith('/help'):
+            help_text = (
+                "🚀 **Доступные команды:**\n\n"
+                "📩 **Просто текст** — обычное сообщение в админку.\n"
+                "💡 `/pred [текст]` — предложить идею для канала.\n"
+                "🆘 `/teh [текст]` — написать в техподдержку.\n"
+                "ℹ️ `/help` — помощь."
+            )
+            bot.send_message(m.chat.id, help_text, parse_mode='Markdown')
             return
 
         m_type, txt = 'log', m.text or "[Медиа]"
         if m.text:
             if m.text.startswith('/pred'): 
-                m_type, txt = 'pred', m.text.replace('/pred','').strip() or "Пусто"
-                bot.reply_to(m, "✅ Твоё предложение отправлено!")
+                m_type, txt = 'pred', m.text.replace('/pred','').strip()
+                if not txt:
+                    bot.reply_to(m, "❌ Напиши текст предложения!")
+                    return
+                bot.reply_to(m, "✅ Предложение отправлено!")
             elif m.text.startswith('/teh'): 
-                m_type, txt = 'teh', m.text.replace('/teh','').strip() or "Пусто"
-                bot.reply_to(m, "🆘 Запрос в поддержку принят!")
+                m_type, txt = 'teh', m.text.replace('/teh','').strip()
+                if not txt:
+                    bot.reply_to(m, "❌ Опиши свою проблему!")
+                    return
+                bot.reply_to(m, "🆘 Запрос принят!")
 
         logs_col.insert_one({
             "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
             "user_id": m.chat.id, "username": m.from_user.username or "N/A",
             "text": txt, "type": m_type
         })
-    except Exception as e: print(f"Помилка в боті: {e}")
+    except Exception as e: print(f"Ошибка в боте: {e}")
 
 if __name__ == "__main__":
-    # Запуск бота у фоновому потоці
     Thread(target=lambda: bot.infinity_polling(timeout=20), daemon=True).start()
-    # Запуск Flask сервера
     app.run(host='0.0.0.0', port=8080)
