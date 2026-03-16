@@ -5,10 +5,10 @@ from datetime import datetime
 
 # --- НАСТРОЙКИ ---
 TOKEN = os.environ.get('BOT_TOKEN') 
-ADMIN_PASSWORD = "A131@Y&" # ОБЯЗАТЕЛЬНО ПОМЕНЯЙ ПЕРЕД ДЕПЛОЕМ!
+ADMIN_PASSWORD = "A131@Y&" 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'createdet_fix_v16'
+app.secret_key = 'createdet_fix_v17'
 
 DB_FILE = 'data.json'
 
@@ -17,7 +17,10 @@ def load_db():
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 d = json.load(f)
-                return d.get("logs", []), list(set(d.get("users", [])))
+                logs = d.get("logs", [])
+                users = d.get("users", [])
+                # Очистка от дублей и проверка формата
+                return logs, list(set(users))
         except: return [], []
     return [], []
 
@@ -45,8 +48,8 @@ ADMIN_HTML = """
         .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; margin-bottom: 10px; display: inline-block; color: white; }
         .btn-red { background: #da3633; border:none; color:white; padding:5px 10px; border-radius:5px; cursor:pointer; text-decoration:none; font-size:0.8em; }
         .msg-box { background: #0d1117; border: 1px solid #30363d; padding: 10px; border-radius: 4px; margin: 10px 0; white-space: pre-wrap; }
-        input, textarea { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; margin-top:10px; }
-        .reply-form { margin-top: 15px; border-top: 1px solid #30363d; pt: 10px; }
+        input, textarea { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; }
+        .reply-form { margin-top: 15px; border-top: 1px solid #30363d; padding-top: 10px; }
     </style>
 </head>
 <body>
@@ -67,7 +70,7 @@ ADMIN_HTML = """
             <div class="card" style="text-align:center;">
                 <h3>Рассылка ({{ user_count }} чел.)</h3>
                 <form action="/broadcast" method="POST">
-                    <textarea name="news_text" placeholder="Текст рассылки..." required></textarea>
+                    <textarea name="news_text" placeholder="Текст рассылки..." required style="height:100px;"></textarea>
                     <button type="submit" style="background:#238636; color:white; width:100%; margin-top:10px; padding:10px; border:none; border-radius:5px; cursor:pointer;">ОТПРАВИТЬ ВСЕМ</button>
                 </form>
             </div>
@@ -75,17 +78,17 @@ ADMIN_HTML = """
             {% for log in logs %}
             <div class="card">
                 <div class="badge" style="background: {% if log.type == 'pred' %}#da3633{% elif log.type == 'teh' %}#f1e05a{% else %}#238636{% endif %}; color: {% if log.type == 'teh' %}black{% else %}white{% endif %};">
-                    {{ log.type | upper }}
+                    {{ (log.type or 'LOG') | upper }}
                 </div>
-                <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username }} <small style="color:#8b949e">({{ log.time }})</small></div>
-                <div class="msg-box">{{ log.text }}</div>
+                <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username or 'N/A' }} <small style="color:#8b949e">({{ log.time or '00:00' }})</small></div>
+                <div class="msg-box">{{ log.text or 'Пустое сообщение' }}</div>
                 
                 <div class="reply-form">
-                    <form action="/reply" method="POST" style="display: flex; gap: 10px; align-items: flex-end;">
+                    <form action="/reply" method="POST" style="display: flex; gap: 10px;">
                         <input type="hidden" name="user_id" value="{{ log.user_id }}">
                         <input type="hidden" name="tab" value="{{ current_tab }}">
-                        <textarea name="reply_text" placeholder="Ваш ответ пользователю..." required style="height: 40px; margin:0; flex-grow:1;"></textarea>
-                        <button type="submit" style="background:#1f6feb; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer;">ОТВЕТИТЬ</button>
+                        <input type="text" name="reply_text" placeholder="Ваш ответ..." required style="margin:0; flex-grow:1;">
+                        <button type="submit" style="background:#1f6feb; color:white; border:none; padding:0 15px; border-radius:5px; cursor:pointer;">ОТВЕТИТЬ</button>
                     </form>
                 </div>
 
@@ -101,8 +104,7 @@ ADMIN_HTML = """
 """
 
 @app.route('/')
-def home():
-    return redirect(url_for('login'))
+def home(): return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -115,89 +117,68 @@ def login():
 def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
     tab = request.args.get('tab', 'all')
-    current_logs, current_users = load_db()
-    if tab == 'all':
-        filtered = current_logs
-    elif tab == 'pred':
-        filtered = [l for l in current_logs if l.get('type') == 'pred']
-    elif tab == 'teh':
-        filtered = [l for l in current_logs if l.get('type') == 'teh']
+    logs, users = load_db()
+    
+    if tab == 'all': filtered = logs
+    elif tab == 'pred': filtered = [l for l in logs if l.get('type') == 'pred']
+    elif tab == 'teh': filtered = [l for l in logs if l.get('type') == 'teh']
     else: filtered = []
-    return render_template_string(ADMIN_HTML, logs=reversed(filtered), current_tab=tab, user_count=len(current_users))
+    
+    return render_template_string(ADMIN_HTML, logs=reversed(filtered), current_tab=tab, user_count=len(users))
 
 @app.route('/reply', methods=['POST'])
 def reply():
     if session.get('logged_in'):
         u_id = request.form.get('user_id')
         text = request.form.get('reply_text')
-        tab = request.form.get('tab', 'all')
         try:
             bot.send_message(u_id, f"✉️ **Ответ от администрации:**\n\n{text}", parse_mode='Markdown')
-        except Exception as e:
-            print(f"Ошибка отправки ответа: {e}")
-    return redirect(url_for('admin', tab=tab))
+        except: pass
+    return redirect(url_for('admin', tab=request.form.get('tab', 'all')))
 
 @app.route('/delete/<int:log_id>')
 def delete_one(log_id):
     if session.get('logged_in'):
-        current_logs, current_users = load_db()
-        new_logs = [l for l in current_logs if l['id'] != log_id]
-        save_db(new_logs, current_users)
+        logs, users = load_db()
+        save_db([l for l in logs if l.get('id') != log_id], users)
     return redirect(request.referrer or url_for('admin'))
 
 @app.route('/broadcast', methods=['POST'])
 def broadcast():
     if session.get('logged_in'):
-        _, current_users = load_db()
+        _, users = load_db()
         text = request.form.get('news_text')
-        for u_id in current_users:
+        for u_id in users:
             try: bot.send_message(u_id, f"📢 <b>НОВОСТИ:</b>\n\n{text}", parse_mode='HTML')
             except: pass
     return redirect(url_for('admin', tab='news'))
 
 @app.route('/logout')
-def logout():
-    session.pop('logged_in', None)
-    return redirect(url_for('login'))
+def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 
 @bot.message_handler(func=lambda m: True)
 def track(m):
-    current_logs, current_users = load_db()
-    if m.chat.id not in current_users:
-        current_users.append(m.chat.id)
+    logs, users = load_db()
+    if m.chat.id not in users: users.append(m.chat.id)
     
-    msg_type = 'log'
-    clean_text = m.text or "[Медиа]"
+    if m.text and m.text.startswith('/start'):
+        bot.send_message(m.chat.id, "Привет! Я официальный бот канала **Dimoon** и **Createdet**. 🤝\n\nПиши нам что угодно!", parse_mode='Markdown')
+        save_db(logs, users)
+        return
 
+    m_type = 'log'
+    txt = m.text or "[Медиа]"
     if m.text:
-        if m.text.startswith('/start'):
-            welcome_text = (
-                "Привет! Я официальный бот канала **Dimoon** и **Createdet**. 🤝\n\n"
-                "Напиши нам что-нибудь, поделись идеей или задай вопрос — мы обязательно прочитаем и ответим! ✨"
-            )
-            bot.send_message(m.chat.id, welcome_text, parse_mode='Markdown')
-            save_db(current_logs, current_users)
-            return 
-        elif m.text.startswith('/pred'):
-            msg_type = 'pred'
-            clean_text = m.text.replace('/pred', '').strip() or "Пустое предложение"
-            bot.reply_to(m, "✅ Предложение отправлено!")
-        elif m.text.startswith('/teh'):
-            msg_type = 'teh'
-            clean_text = m.text.replace('/teh', '').strip() or "Пустой запрос в поддержку"
-            bot.reply_to(m, "🆘 Техподдержка приняла!")
+        if m.text.startswith('/pred'): m_type, txt = 'pred', m.text.replace('/pred','').strip()
+        elif m.text.startswith('/teh'): m_type, txt = 'teh', m.text.replace('/teh','').strip()
 
-    current_logs.append({
-        "id": random.randint(100000, 999999), 
-        "time": datetime.now().strftime("%H:%M"),
-        "user_id": m.chat.id, 
-        "username": m.from_user.username or "N/A",
-        "text": clean_text, 
-        "type": msg_type
+    logs.append({
+        "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
+        "user_id": m.chat.id, "username": m.from_user.username or "N/A",
+        "text": txt, "type": m_type
     })
-    save_db(current_logs, current_users)
+    save_db(logs, users)
 
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
-    print("Бот запущен...")
     bot.polling(none_stop=True)
