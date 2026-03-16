@@ -163,10 +163,10 @@ def track(m):
         m_type, txt = 'log', m.text or "[Медиа]"
         if m.text:
             if m.text.startswith('/pred'): 
-                m_type, txt = 'pred', m.text.replace('/pred','').strip() or "Пусте"
+                m_type, txt = 'pred', m.text.replace('/pred','').strip() or "Пусто"
                 bot.reply_to(m, "✅ Твоё предложение отправлено!")
             elif m.text.startswith('/teh'): 
-                m_type, txt = 'teh', m.text.replace('/teh','').strip() or "Пусте"
+                m_type, txt = 'teh', m.text.replace('/teh','').strip() or "Пусто"
                 bot.reply_to(m, "🆘 Запрос в поддержку принят!")
 
         logs_col.insert_one({
@@ -177,5 +177,7 @@ def track(m):
     except Exception as e: print(f"Помилка в боті: {e}")
 
 if __name__ == "__main__":
+    # Запуск бота у фоновому потоці
     Thread(target=lambda: bot.infinity_polling(timeout=20), daemon=True).start()
+    # Запуск Flask сервера
     app.run(host='0.0.0.0', port=8080)
