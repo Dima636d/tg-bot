@@ -3,12 +3,12 @@ from flask import Flask, render_template_string, request, session, redirect, url
 from threading import Thread
 from datetime import datetime
 
-# --- НАЛАШТУВАННЯ ---
+# --- НАСТРОЙКИ ---
 TOKEN = os.environ.get('BOT_TOKEN') 
-ADMIN_PASSWORD = "A131@Y&" 
+ADMIN_PASSWORD = "A131@Y&" # ОБЯЗАТЕЛЬНО ПОМЕНЯЙ ПЕРЕД ДЕПЛОЕМ!
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'createdet_fix_v15'
+app.secret_key = 'createdet_fix_v16'
 
 DB_FILE = 'data.json'
 
@@ -43,9 +43,10 @@ ADMIN_HTML = """
         .tab-btn.active { background: #1f6feb; color: white; border-color: #58a6ff; }
         .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
         .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; margin-bottom: 10px; display: inline-block; color: white; }
-        .btn-red { background: #da3633; border:none; color:white; padding:5px 10px; border-radius:5px; cursor:pointer; }
-        .msg-box { background: #0d1117; border: 1px solid #30363d; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        input, textarea { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; }
+        .btn-red { background: #da3633; border:none; color:white; padding:5px 10px; border-radius:5px; cursor:pointer; text-decoration:none; font-size:0.8em; }
+        .msg-box { background: #0d1117; border: 1px solid #30363d; padding: 10px; border-radius: 4px; margin: 10px 0; white-space: pre-wrap; }
+        input, textarea { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; margin-top:10px; }
+        .reply-form { margin-top: 15px; border-top: 1px solid #30363d; pt: 10px; }
     </style>
 </head>
 <body>
@@ -66,8 +67,8 @@ ADMIN_HTML = """
             <div class="card" style="text-align:center;">
                 <h3>Рассылка ({{ user_count }} чел.)</h3>
                 <form action="/broadcast" method="POST">
-                    <textarea name="news_text" placeholder="Текст..." required></textarea>
-                    <button type="submit" style="background:#238636; color:white; width:100%; margin-top:10px; padding:10px; border:none; border-radius:5px; cursor:pointer;">ОТПРАВИТЬ</button>
+                    <textarea name="news_text" placeholder="Текст рассылки..." required></textarea>
+                    <button type="submit" style="background:#238636; color:white; width:100%; margin-top:10px; padding:10px; border:none; border-radius:5px; cursor:pointer;">ОТПРАВИТЬ ВСЕМ</button>
                 </form>
             </div>
         {% else %}
@@ -78,6 +79,16 @@ ADMIN_HTML = """
                 </div>
                 <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username }} <small style="color:#8b949e">({{ log.time }})</small></div>
                 <div class="msg-box">{{ log.text }}</div>
+                
+                <div class="reply-form">
+                    <form action="/reply" method="POST" style="display: flex; gap: 10px; align-items: flex-end;">
+                        <input type="hidden" name="user_id" value="{{ log.user_id }}">
+                        <input type="hidden" name="tab" value="{{ current_tab }}">
+                        <textarea name="reply_text" placeholder="Ваш ответ пользователю..." required style="height: 40px; margin:0; flex-grow:1;"></textarea>
+                        <button type="submit" style="background:#1f6feb; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer;">ОТВЕТИТЬ</button>
+                    </form>
+                </div>
+
                 <a href="/delete/{{ log.id }}?tab={{ current_tab }}" class="btn-red" style="position: absolute; top: 15px; right: 15px;">УДАЛИТЬ</a>
             </div>
             {% else %}
@@ -113,6 +124,18 @@ def admin():
         filtered = [l for l in current_logs if l.get('type') == 'teh']
     else: filtered = []
     return render_template_string(ADMIN_HTML, logs=reversed(filtered), current_tab=tab, user_count=len(current_users))
+
+@app.route('/reply', methods=['POST'])
+def reply():
+    if session.get('logged_in'):
+        u_id = request.form.get('user_id')
+        text = request.form.get('reply_text')
+        tab = request.form.get('tab', 'all')
+        try:
+            bot.send_message(u_id, f"✉️ **Ответ от администрации:**\n\n{text}", parse_mode='Markdown')
+        except Exception as e:
+            print(f"Ошибка отправки ответа: {e}")
+    return redirect(url_for('admin', tab=tab))
 
 @app.route('/delete/<int:log_id>')
 def delete_one(log_id):
