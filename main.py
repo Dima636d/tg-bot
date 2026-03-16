@@ -155,7 +155,7 @@ def track(m):
             welcome = (
                 "Привет! Я официальный бот каналов **Dimoon** и **Createdet**. 🤝\n\n"
                 "Пиши нам что угодно!\n"
-                "Основной канал: https://t.me"
+                "Основной канал: https://t.me/Dimooner1"
             )
             bot.send_message(m.chat.id, welcome, parse_mode='Markdown', disable_web_page_preview=False)
             return
