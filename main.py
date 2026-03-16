@@ -6,19 +6,18 @@ from datetime import datetime
 # --- НАСТРОЙКИ ---
 TOKEN = os.environ.get('BOT_TOKEN')
 MONGO_URL = os.environ.get('MONGO_URL') 
-ADMIN_PASSWORD = "A131@Y&" # Пароль для входа в твою админку
-
+ADMIN_PASSWORD = "A131@Y&" # Твой пароль
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'createdet_ultra_v20'
+app.secret_key = 'createdet_final_v21'
 
 # Подключение к MongoDB Atlas
 try:
-    client = pymongo.MongoClient(MONGO_URL)
+    client = pymongo.MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
     db = client['bot_database']
     logs_col = db['logs']
     users_col = db['users']
-    print("✅ Успешное подключение к MongoDB Atlas")
+    print("✅ База данных подключена успешно!")
 except Exception as e:
     print(f"❌ Ошибка подключения к базе: {e}")
 
@@ -49,7 +48,6 @@ ADMIN_HTML = """
             <h2 style="color: #58a6ff; margin:0;">🛠 Createdet Admin</h2>
             <a href="/logout" class="tab-btn">Выход</a>
         </div>
-
         <div class="tabs">
             <a href="/admin?tab=all" class="tab-btn {% if current_tab == 'all' %}active{% endif %}">ВСЕ ЛОГИ</a>
             <a href="/admin?tab=pred" class="tab-btn {% if current_tab == 'pred' %}active{% endif %}">ПРЕДЛОЖЕНИЯ</a>
@@ -59,10 +57,10 @@ ADMIN_HTML = """
 
         {% if current_tab == 'news' %}
             <div class="card" style="text-align:center;">
-                <h3>Рассылка (Зарегистрировано: {{ user_count }} чел.)</h3>
+                <h3>Рассылка ({{ user_count }} чел.)</h3>
                 <form action="/broadcast" method="POST">
-                    <textarea name="news_text" placeholder="Текст сообщения для всех пользователей..." required style="height:120px;"></textarea>
-                    <button type="submit" style="background:#238636; color:white; width:100%; margin-top:10px; padding:12px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">ЗАПУСТИТЬ РАССЫЛКУ</button>
+                    <textarea name="news_text" placeholder="Текст рассылки..." required style="height:100px;"></textarea>
+                    <button type="submit" style="background:#238636; color:white; width:100%; margin-top:10px; padding:10px; border:none; border-radius:5px; cursor:pointer;">ОТПРАВИТЬ ВСЕМ</button>
                 </form>
             </div>
         {% else %}
@@ -73,20 +71,18 @@ ADMIN_HTML = """
                 </div>
                 <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username or 'N/A' }} <small style="color:#8b949e">({{ log.time or '00:00' }})</small></div>
                 <div class="msg-box">{{ log.text or 'Пустое сообщение' }}</div>
-                
                 <div class="reply-form">
                     <form action="/reply" method="POST" style="display: flex; gap: 10px;">
                         <input type="hidden" name="user_id" value="{{ log.user_id }}">
                         <input type="hidden" name="tab" value="{{ current_tab }}">
-                        <input type="text" name="reply_text" placeholder="Ваш ответ пользователю..." required style="margin:0; flex-grow:1;">
+                        <input type="text" name="reply_text" placeholder="Ваш ответ..." required style="margin:0; flex-grow:1;">
                         <button type="submit" style="background:#1f6feb; color:white; border:none; padding:0 15px; border-radius:5px; cursor:pointer;">ОТВЕТИТЬ</button>
                     </form>
                 </div>
-
                 <a href="/delete/{{ log.id }}?tab={{ current_tab }}" class="btn-red" style="position: absolute; top: 15px; right: 15px;">УДАЛИТЬ</a>
             </div>
             {% else %}
-            <p style="text-align:center; color: #8b949e; padding: 50px 0;">Сообщений пока нет</p>
+            <p style="text-align:center; color: #8b949e;">Сообщений нет</p>
             {% endfor %}
         {% endif %}
     </div>
@@ -102,45 +98,46 @@ def login():
     if request.method == 'POST' and request.form.get('password') == ADMIN_PASSWORD:
         session['logged_in'] = True
         return redirect(url_for('admin'))
-    return '<body style="background:#0d1117;color:white;text-align:center;padding-top:100px;font-family:sans-serif;"><form method="POST"><h2>ADMIN ACCESS</h2><input type="password" name="password" style="padding:10px; border-radius:5px; border:none;"><button type="submit" style="padding:10px 20px; margin-left:10px; cursor:pointer;">ENTER</button></form></body>'
+    return '<body style="background:#0d1117;color:white;text-align:center;padding-top:100px;"><form method="POST"><h2>ADMIN PASS</h2><input type="password" name="password"><button type="submit">GO</button></form></body>'
 
 @app.route('/admin')
 def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
     tab = request.args.get('tab', 'all')
     
-    logs = list(logs_col.find({}, {'_id': 0}))
-    user_count = users_col.count_documents({})
-    
-    if tab == 'pred': filtered = [l for l in logs if l.get('type') == 'pred']
-    elif tab == 'teh': filtered = [l for l in logs if l.get('type') == 'teh']
-    else: filtered = logs
-    
-    return render_template_string(ADMIN_HTML, logs=reversed(filtered), current_tab=tab, user_count=user_count)
+    try:
+        # Лимит 100 последних логов, чтобы сайт не тормозил
+        all_logs = list(logs_col.find({}, {'_id': 0}).sort('_id', -1).limit(100))
+        user_count = users_col.count_documents({})
+        
+        if tab == 'pred': filtered = [l for l in all_logs if l.get('type') == 'pred']
+        elif tab == 'teh': filtered = [l for l in all_logs if l.get('type') == 'teh']
+        else: filtered = all_logs
+        
+        return render_template_string(ADMIN_HTML, logs=filtered, current_tab=tab, user_count=user_count)
+    except Exception as e:
+        return f"Ошибка БД: {e}"
 
 @app.route('/reply', methods=['POST'])
 def reply():
     if session.get('logged_in'):
         u_id = request.form.get('user_id')
         text = request.form.get('reply_text')
-        try:
-            bot.send_message(u_id, f"✉️ **Ответ администрации:**\n\n{text}", parse_mode='Markdown')
+        try: bot.send_message(u_id, f"✉️ **Ответ администрации:**\n\n{text}", parse_mode='Markdown')
         except: pass
     return redirect(url_for('admin', tab=request.form.get('tab', 'all')))
 
 @app.route('/delete/<int:log_id>')
 def delete_one(log_id):
-    if session.get('logged_in'):
-        logs_col.delete_one({"id": log_id})
+    if session.get('logged_in'): logs_col.delete_one({"id": log_id})
     return redirect(request.referrer or url_for('admin'))
 
 @app.route('/broadcast', methods=['POST'])
 def broadcast():
     if session.get('logged_in'):
         text = request.form.get('news_text')
-        for user in users_col.find():
-            try:
-                bot.send_message(user['user_id'], f"📢 **НОВОСТИ:**\n\n{text}", parse_mode='Markdown')
+        for u in users_col.find():
+            try: bot.send_message(u['user_id'], f"📢 <b>НОВОСТИ:</b>\n\n{text}", parse_mode='HTML')
             except: pass
     return redirect(url_for('admin', tab='news'))
 
@@ -149,41 +146,31 @@ def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 
 @bot.message_handler(func=lambda m: True)
 def track(m):
-    # Сохраняем пользователя в базу (без дублей)
+    # Сохраняем юзера
     users_col.update_one({"user_id": m.chat.id}, {"$set": {"user_id": m.chat.id}}, upsert=True)
     
     if m.text and m.text.startswith('/start'):
-        welcome = "Привет! Я официальный бот канала **Dimoon** и **Createdet**. 🤝\n\nНапиши нам сообщение или воспользуйся командами:\n/pred — предложить идею\n/teh — техподдержка"
-        bot.send_message(m.chat.id, welcome, parse_mode='Markdown')
+        bot.send_message(m.chat.id, "Привет! Я бот канала **Createdet**. 🤝", parse_mode='Markdown')
         return
 
     m_type, txt = 'log', m.text or "[Медиа]"
     if m.text:
-        if m.text.startswith('/pred'):
-            m_type, txt = 'pred', m.text.replace('/pred','').strip()
-            if not txt: 
-                bot.reply_to(m, "❌ Напиши текст предложения после команды!")
-                return
-            bot.reply_to(m, "✅ Твоё предложение отправлено!")
-        elif m.text.startswith('/teh'):
-            m_type, txt = 'teh', m.text.replace('/teh','').strip()
-            if not txt:
-                bot.reply_to(m, "❌ Опиши свою проблему после команды!")
-                return
-            bot.reply_to(m, "🆘 Запрос в поддержку принят!")
+        if m.text.startswith('/pred'): m_type, txt = 'pred', m.text.replace('/pred','').strip()
+        elif m.text.startswith('/teh'): m_type, txt = 'teh', m.text.replace('/teh','').strip()
 
-    # Запись сообщения в логи в MongoDB
     logs_col.insert_one({
-        "id": random.randint(100000, 999999), 
-        "time": datetime.now().strftime("%H:%M"),
-        "user_id": m.chat.id, 
-        "username": m.from_user.username or "N/A",
-        "text": txt, 
-        "type": m_type
+        "id": random.randint(100000, 999999), "time": datetime.now().strftime("%H:%M"),
+        "user_id": m.chat.id, "username": m.from_user.username or "N/A",
+        "text": txt, "type": m_type
     })
 
+def run_bot():
+    print("🤖 Бот запускается...")
+    bot.polling(none_stop=True, interval=1)
+
 if __name__ == "__main__":
-    # Запуск Flask в потоке
-    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
-    print("🚀 Бот и админка запущены!")
-    bot.polling(none_stop=True)
+    # Запускаем бота в фоне
+    Thread(target=run_bot, daemon=True).start()
+    # Запускаем Flask в главном потоке
+    print("🌐 Админка готова!")
+    app.run(host='0.0.0.0', port=8080)
