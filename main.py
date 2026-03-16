@@ -105,7 +105,6 @@ def admin():
     if not session.get('logged_in'): return redirect(url_for('login'))
     tab = request.args.get('tab', 'all')
     current_logs, current_users = load_db()
-    
     if tab == 'all':
         filtered = current_logs
     elif tab == 'pred':
@@ -113,7 +112,6 @@ def admin():
     elif tab == 'teh':
         filtered = [l for l in current_logs if l.get('type') == 'teh']
     else: filtered = []
-        
     return render_template_string(ADMIN_HTML, logs=reversed(filtered), current_tab=tab, user_count=len(current_users))
 
 @app.route('/delete/<int:log_id>')
@@ -155,23 +153,15 @@ def track(m):
                 "Напиши нам что-нибудь, поделись идеей или задай вопрос — мы обязательно прочитаем и ответим! ✨"
             )
             bot.send_message(m.chat.id, welcome_text, parse_mode='Markdown')
-            
-            # Оновлюємо список користувачів (без запису тексту старту в логи)
             save_db(current_logs, current_users)
             return 
         elif m.text.startswith('/pred'):
             msg_type = 'pred'
-            clean_text = m.text.replace('/pred', '').strip()
-            if not clean_text:
-                bot.reply_to(m, "❌ Напиши текст предложения после команды!")
-                return
+            clean_text = m.text.replace('/pred', '').strip() or "Пустое предложение"
             bot.reply_to(m, "✅ Предложение отправлено!")
         elif m.text.startswith('/teh'):
             msg_type = 'teh'
-            clean_text = m.text.replace('/teh', '').strip()
-            if not clean_text:
-                bot.reply_to(m, "❌ Опиши свою проблему после команды!")
-                return
+            clean_text = m.text.replace('/teh', '').strip() or "Пустой запрос в поддержку"
             bot.reply_to(m, "🆘 Техподдержка приняла!")
 
     current_logs.append({
@@ -179,18 +169,12 @@ def track(m):
         "time": datetime.now().strftime("%H:%M"),
         "user_id": m.chat.id, 
         "username": m.from_user.username or "N/A",
-               "text": clean_text, 
+        "text": clean_text, 
         "type": msg_type
     })
     save_db(current_logs, current_users)
 
-# --- ЗАПУСК ---
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
-
 if __name__ == "__main__":
-    # Запускаємо сайт у фоновому потоці
-    Thread(target=run_flask).start()
-    # Запускаємо бота
-    print("Бот працює...")
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
+    print("Бот запущен...")
     bot.polling(none_stop=True)
