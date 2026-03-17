@@ -9,7 +9,7 @@ MONGO_URL = os.environ.get('MONGO_URL')
 ADMIN_PASSWORD = "A131@Y&"
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'server_final_fix_v32'
+app.secret_key = 'server_reply_fix_v33'
 
 # Підключення до MongoDB
 client = None
@@ -43,9 +43,9 @@ ADMIN_HTML = """
         .btn { padding: 6px 12px; border:none; border-radius:5px; cursor:pointer; color:white; text-decoration:none; font-size:0.8em; font-weight:bold; }
         .btn-red { background: #da3633; }
         .btn-green { background: #238636; }
-        .btn-warn { background: #f1e05a; color: black; }
         .msg-box { background: #0d1117; border: 1px solid #30363d; padding: 10px; border-radius: 4px; margin: 10px 0; white-space: pre-wrap; }
         input, textarea { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; }
+        .reply-form { margin-top: 10px; display: flex; gap: 5px; }
     </style>
 </head>
 <body>
@@ -67,7 +67,7 @@ ADMIN_HTML = """
             <div class="card" style="text-align:center;">
                 <h3>Рассылка ({{ user_count }} чел.)</h3>
                 <form action="/broadcast" method="POST">
-                    <textarea name="news_text" placeholder="Текст..." required></textarea>
+                    <textarea name="news_text" placeholder="Текст рассылки..." required></textarea>
                     <button type="submit" class="btn btn-green" style="width:100%; margin-top:10px; padding:12px;">ОТПРАВИТЬ ВСЕМ</button>
                 </form>
             </div>
@@ -75,7 +75,7 @@ ADMIN_HTML = """
             {% for user in users_list %}
                 <div class="card">
                     <div style="font-weight:bold; color:#58a6ff;">ID: {{ user.user_id }} | @{{ user.username }}</div>
-                    <div style="margin:10px 0;">Варны: {{ user.warns or 0 }} | Статус: {% if user.is_banned %}🚫 ЗАБАНЕН{% else %}✅ ОК{% endif %}</div>
+                    <div style="margin:10px 0;">Статус: {% if user.is_banned %}🚫 ЗАБАНЕН{% else %}✅ ОК{% endif %}</div>
                     <form action="/moderate" method="POST" style="display:flex; gap:10px;">
                         <input type="hidden" name="user_id" value="{{ user.user_id }}">
                         <input type="number" name="mins" placeholder="Мин" style="width:70px;">
@@ -92,6 +92,14 @@ ADMIN_HTML = """
                 </div>
                 <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username }}</div>
                 <div class="msg-box">{{ log.text }}</div>
+                
+                <!-- ФОРМА ВІДПОВІДІ -->
+                <form action="/reply" method="POST" class="reply-form">
+                    <input type="hidden" name="user_id" value="{{ log.user_id }}">
+                    <input type="text" name="reply_text" placeholder="Ваш ответ..." required>
+                    <button type="submit" class="btn" style="background:#1f6feb;">ОТВЕТИТЬ</button>
+                </form>
+
                 <a href="/delete/{{ log.id }}?tab={{ current_tab }}" class="btn btn-red" style="position: absolute; top: 15px; right: 15px;">УДАЛИТЬ</a>
             </div>
             {% endfor %}
@@ -120,7 +128,7 @@ def admin():
     
     users_list = []
     if tab == 'bans':
-        for u in list(users_col.find().limit(20)):
+        for u in list(users_col.find().limit(50)):
             ban = bans_col.find_one({"user_id": u['user_id']})
             u['is_banned'] = True if (ban and datetime.now() < ban['until']) else False
             users_list.append(u)
@@ -130,6 +138,16 @@ def admin():
     else: filtered = logs
 
     return render_template_string(ADMIN_HTML, logs=filtered, current_tab=tab, user_count=u_count, users_list=users_list)
+
+@app.route('/reply', methods=['POST'])
+def reply():
+    if session.get('logged_in'):
+        u_id = int(request.form.get('user_id'))
+        text = request.form.get('reply_text')
+        try:
+            bot.send_message(u_id, f"✉️ **Ответ администрации:**\n\n{text}", parse_mode='Markdown')
+        except: pass
+    return redirect(request.referrer)
 
 @app.route('/moderate', methods=['POST'])
 def moderate():
@@ -159,33 +177,34 @@ def delete_one(log_id):
 @app.route('/logout')
 def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 
-# --- BOT LOGIC ---
 @bot.message_handler(func=lambda m: True)
 def track(m):
     try:
         if not client: return
         
-        # Перевірка бану
-        ban = bans_col.find_one({"user_id": m.chat.id})
-        if ban and datetime.now() < ban['until']:
-            bot.send_message(m.chat.id, "❌ Вы заблокированы.")
-            return
-
-        # РЕЄСТРАЦІЯ (ОБОВ'ЯЗКОВО)
+        # 1. Реєстрація (щоб працювала розсилка та відповіді)
         users_col.update_one(
             {"user_id": m.chat.id}, 
             {"$set": {"username": m.from_user.username or "N/A"}}, 
             upsert=True
         )
 
+        # 2. Перевірка бану
+        ban = bans_col.find_one({"user_id": m.chat.id})
+        if ban and datetime.now() < ban['until']:
+            bot.send_message(m.chat.id, "❌ Вы заблокированы.")
+            return
+
+        # 3. Команди
         if m.text and m.text.startswith('/start'):
-            bot.send_message(m.chat.id, "Привет! Я бот каналов **Dimoon** и **Createdet**. 🤝\nИспользуй /help для команд.", parse_mode='Markdown')
+            bot.send_message(m.chat.id, "Привет! Я бот каналов **Dimoon** и **Createdet**. 🤝\nПиши что угодно!", parse_mode='Markdown')
             return
         
         if m.text and m.text.startswith('/help'):
             bot.send_message(m.chat.id, "🚀 **Команды:**\n/pred [текст] - идея\n/teh [текст] - помощь", parse_mode='Markdown')
             return
 
+        # 4. Обробка типів
         m_type, txt = 'log', m.text or "[Медиа]"
         if m.text:
             if m.text.startswith('/pred'): 
@@ -195,7 +214,7 @@ def track(m):
                 m_type, txt = 'teh', m.text.replace('/teh','').strip()
                 bot.reply_to(m, "🆘 Ожидайте!")
 
-        # ЗАПИС В БАЗУ
+        # 5. Запис у базу
         logs_col.insert_one({
             "id": random.randint(100000, 999999), 
             "time": datetime.now().strftime("%H:%M"),
