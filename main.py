@@ -1,106 +1,99 @@
-import os, telebot, random, pymongo
+import os, telebot, random, json
 from flask import Flask, render_template_string, request, session, redirect, url_for
 from threading import Thread
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- НАЛАШТУВАННЯ ---
-TOKEN = os.environ.get('BOT_TOKEN')
-MONGO_URL = os.environ.get('MONGO_URL') 
-ADMIN_PASSWORD = "A131@Y&"
+TOKEN = os.environ.get('BOT_TOKEN') # Або встав свій токен прямо сюди
+ADMIN_PASSWORD = "A131@Y&" 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
-app.secret_key = 'server_reply_fix_v33'
+app.secret_key = 'createdet_contact_v34'
 
-# Підключення до MongoDB
-client = None
-try:
-    if MONGO_URL:
-        client = pymongo.MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
-        db = client['bot_database']
-        logs_col = db['logs']
-        users_col = db['users']
-        bans_col = db['bans']
-        client.admin.command('ping')
-        print("✅ MongoDB підключено!")
-except Exception as e:
-    print(f"❌ Помилка бази: {e}")
+DB_FILE = 'data.json'
+
+# --- РОБОТА З БАЗОЮ (JSON) ---
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Повертаємо логи та словник юзерів {id: username}
+                return data.get("logs", []), data.get("users", {})
+        except: return [], {}
+    return [], {}
+
+def save_db(logs, users):
+    try:
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"logs": logs, "users": users}, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Ошибка сохранения БД: {e}")
 
 # --- HTML ШАБЛОН ---
 ADMIN_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Admin Panel Createdet</title>
+    <title>Admin Createdet v34</title>
     <style>
         body { font-family: sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; }
+        .container { max-width: 850px; margin: 0 auto; }
         .header { background: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-        .tab-btn { padding: 10px 20px; background: #30363d; color: #c9d1d9; text-decoration: none; border-radius: 6px; font-size: 0.9em; border: 1px solid transparent; }
-        .tab-btn.active { background: #1f6feb; color: white; border-color: #58a6ff; }
+        .tab-btn { padding: 10px 20px; background: #30363d; color: #c9d1d9; text-decoration: none; border-radius: 6px; font-size: 0.9em; }
+        .tab-btn.active { background: #1f6feb; color: white; }
         .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; margin-bottom: 15px; position: relative; }
-        .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7em; font-weight: bold; margin-bottom: 10px; display: inline-block; color: white; }
-        .btn { padding: 6px 12px; border:none; border-radius:5px; cursor:pointer; color:white; text-decoration:none; font-size:0.8em; font-weight:bold; }
-        .btn-red { background: #da3633; }
-        .btn-green { background: #238636; }
-        .msg-box { background: #0d1117; border: 1px solid #30363d; padding: 10px; border-radius: 4px; margin: 10px 0; white-space: pre-wrap; }
-        input, textarea { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; }
-        .reply-form { margin-top: 10px; display: flex; gap: 5px; }
+        .msg-box { background: #0d1117; border: 1px solid #30363d; padding: 10px; border-radius: 4px; margin: 10px 0; }
+        input, textarea, select { background: #0d1117; border: 1px solid #30363d; color: white; padding: 10px; border-radius: 5px; width: 100%; box-sizing: border-box; }
+        .btn { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h2 style="color: #58a6ff; margin:0;">🛠 Global Admin</h2>
+            <h2 style="color: #58a6ff; margin:0;">🛠 Createdet Admin</h2>
             <a href="/logout" class="tab-btn">Выход</a>
         </div>
 
         <div class="tabs">
-            <a href="/admin?tab=all" class="tab-btn {% if current_tab == 'all' %}active{% endif %}">ВСЕ ЛОГИ</a>
-            <a href="/admin?tab=pred" class="tab-btn {% if current_tab == 'pred' %}active{% endif %}">ПРЕДЛОЖЕНИЯ</a>
-            <a href="/admin?tab=teh" class="tab-btn {% if current_tab == 'teh' %}active{% endif %}">ТЕХПОДДЕРЖКА</a>
-            <a href="/admin?tab=bans" class="tab-btn {% if current_tab == 'bans' %}active{% endif %}">🚫 БАНЫ</a>
+            <a href="/admin?tab=all" class="tab-btn {% if current_tab == 'all' %}active{% endif %}">ЛОГИ</a>
+            <a href="/admin?tab=personal" class="tab-btn {% if current_tab == 'personal' %}active{% endif %}">✉️ НАПИСАТЬ ЛИЧНО</a>
             <a href="/admin?tab=news" class="tab-btn {% if current_tab == 'news' %}active{% endif %}">📢 НОВОСТИ</a>
         </div>
 
-        {% if current_tab == 'news' %}
-            <div class="card" style="text-align:center;">
-                <h3>Рассылка ({{ user_count }} чел.)</h3>
-                <form action="/broadcast" method="POST">
-                    <textarea name="news_text" placeholder="Текст рассылки..." required></textarea>
-                    <button type="submit" class="btn btn-green" style="width:100%; margin-top:10px; padding:12px;">ОТПРАВИТЬ ВСЕМ</button>
+        {% if current_tab == 'personal' %}
+            <div class="card">
+                <h3>Написать пользователю лично</h3>
+                <form action="/send_private" method="POST">
+                    <label>Выберите получателя:</label>
+                    <select name="user_id" required style="margin-bottom:15px;">
+                        {% for uid, uname in users.items() %}
+                            <option value="{{ uid }}">ID: {{ uid }} (@{{ uname }})</option>
+                        {% endfor %}
+                    </select>
+                    <textarea name="private_msg" placeholder="Текст сообщения..." required style="height:100px;"></textarea>
+                    <button type="submit" class="btn" style="width:100%; margin-top:10px;">ОТПРАВИТЬ СООБЩЕНИЕ</button>
                 </form>
             </div>
-        {% elif current_tab == 'bans' %}
-            {% for user in users_list %}
-                <div class="card">
-                    <div style="font-weight:bold; color:#58a6ff;">ID: {{ user.user_id }} | @{{ user.username }}</div>
-                    <div style="margin:10px 0;">Статус: {% if user.is_banned %}🚫 ЗАБАНЕН{% else %}✅ ОК{% endif %}</div>
-                    <form action="/moderate" method="POST" style="display:flex; gap:10px;">
-                        <input type="hidden" name="user_id" value="{{ user.user_id }}">
-                        <input type="number" name="mins" placeholder="Мин" style="width:70px;">
-                        <button name="act" value="ban" class="btn btn-red">БАН</button>
-                        <button name="act" value="unban" class="btn btn-green">РАЗБАН</button>
-                    </form>
-                </div>
-            {% endfor %}
+        {% elif current_tab == 'news' %}
+            <div class="card" style="text-align:center;">
+                <h3>Общая рассылка ({{ users|length }} чел.)</h3>
+                <form action="/broadcast" method="POST">
+                    <textarea name="news_text" placeholder="Текст рассылки для всех..." required style="height:100px;"></textarea>
+                    <button type="submit" class="btn" style="width:100%; margin-top:10px;">ЗАПУСТИТЬ</button>
+                </form>
+            </div>
         {% else %}
             {% for log in logs %}
             <div class="card">
-                <div class="badge" style="background: {% if log.type == 'pred' %}#da3633{% elif log.type == 'teh' %}#f1e05a{% else %}#238636{% endif %}; color: {% if log.type == 'teh' %}black{% else %}white{% endif %};">
-                    {{ (log.type or 'LOG') | upper }}
-                </div>
-                <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username }}</div>
+                <div style="font-weight: bold; color: #58a6ff;">ID: {{ log.user_id }} | @{{ log.username }} <small style="color:#8b949e">({{ log.time }})</small></div>
                 <div class="msg-box">{{ log.text }}</div>
-                
-                <!-- ФОРМА ВІДПОВІДІ -->
-                <form action="/reply" method="POST" class="reply-form">
+                <form action="/send_private" method="POST" style="display:flex; gap:5px;">
                     <input type="hidden" name="user_id" value="{{ log.user_id }}">
-                    <input type="text" name="reply_text" placeholder="Ваш ответ..." required>
-                    <button type="submit" class="btn" style="background:#1f6feb;">ОТВЕТИТЬ</button>
+                    <input type="text" name="private_msg" placeholder="Быстрый ответ..." required>
+                    <button type="submit" class="btn" style="background:#1f6feb;">➡️</button>
                 </form>
-
-                <a href="/delete/{{ log.id }}?tab={{ current_tab }}" class="btn btn-red" style="position: absolute; top: 15px; right: 15px;">УДАЛИТЬ</a>
             </div>
             {% endfor %}
         {% endif %}
@@ -109,121 +102,67 @@ ADMIN_HTML = """
 </html>
 """
 
-@app.route('/')
-def home(): return redirect(url_for('login'))
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST' and request.form.get('password') == ADMIN_PASSWORD:
         session['logged_in'] = True
         return redirect(url_for('admin'))
-    return '<form method="POST" style="text-align:center;padding-top:100px;"><input type="password" name="password"><button>GO</button></form>'
+    return '<body style="background:#0d1117;color:white;text-align:center;padding-top:100px;"><form method="POST"><h2>ADMIN PASS</h2><input type="password" name="password"><button type="submit">GO</button></form></body>'
 
 @app.route('/admin')
 def admin():
-    if not session.get('logged_in') or not client: return redirect(url_for('login'))
+    if not session.get('logged_in'): return redirect(url_for('login'))
     tab = request.args.get('tab', 'all')
-    logs = list(logs_col.find().sort('_id', -1).limit(50))
-    u_count = users_col.count_documents({})
-    
-    users_list = []
-    if tab == 'bans':
-        for u in list(users_col.find().limit(50)):
-            ban = bans_col.find_one({"user_id": u['user_id']})
-            u['is_banned'] = True if (ban and datetime.now() < ban['until']) else False
-            users_list.append(u)
+    logs, users = load_db()
+    return render_template_string(ADMIN_HTML, logs=reversed(logs[-100:]), users=users, current_tab=tab)
 
-    if tab == 'pred': filtered = [l for l in logs if l.get('type') == 'pred']
-    elif tab == 'teh': filtered = [l for l in logs if l.get('type') == 'teh']
-    else: filtered = logs
-
-    return render_template_string(ADMIN_HTML, logs=filtered, current_tab=tab, user_count=u_count, users_list=users_list)
-
-@app.route('/reply', methods=['POST'])
-def reply():
+@app.route('/send_private', methods=['POST'])
+def send_private():
     if session.get('logged_in'):
-        u_id = int(request.form.get('user_id'))
-        text = request.form.get('reply_text')
+        u_id = request.form.get('user_id')
+        msg = request.form.get('private_msg')
         try:
-            bot.send_message(u_id, f"✉️ **Ответ администрации:**\n\n{text}", parse_mode='Markdown')
+            bot.send_message(u_id, f"💬 **Сообщение от администрации:**\n\n{msg}", parse_mode='Markdown')
         except: pass
-    return redirect(request.referrer)
-
-@app.route('/moderate', methods=['POST'])
-def moderate():
-    uid = int(request.form.get('user_id'))
-    act = request.form.get('act')
-    if act == "ban":
-        mins = int(request.form.get('mins') or 60)
-        bans_col.update_one({"user_id": uid}, {"$set": {"until": datetime.now() + timedelta(minutes=mins)}}, upsert=True)
-    elif act == "unban":
-        bans_col.delete_one({"user_id": uid})
     return redirect(request.referrer)
 
 @app.route('/broadcast', methods=['POST'])
 def broadcast():
     if session.get('logged_in'):
+        _, users = load_db()
         text = request.form.get('news_text')
-        for u in users_col.find():
-            try: bot.send_message(u['user_id'], f"📢 **НОВОСТИ:**\n\n{text}", parse_mode='Markdown')
+        for u_id in users.keys():
+            try: bot.send_message(u_id, f"📢 **НОВОСТИ:**\n\n{text}", parse_mode='Markdown')
             except: pass
     return redirect(url_for('admin', tab='news'))
-
-@app.route('/delete/<int:log_id>')
-def delete_one(log_id):
-    logs_col.delete_one({"id": log_id})
-    return redirect(request.referrer)
 
 @app.route('/logout')
 def logout(): session.pop('logged_in', None); return redirect(url_for('login'))
 
 @bot.message_handler(func=lambda m: True)
 def track(m):
-    try:
-        if not client: return
-        
-        # 1. Реєстрація (щоб працювала розсилка та відповіді)
-        users_col.update_one(
-            {"user_id": m.chat.id}, 
-            {"$set": {"username": m.from_user.username or "N/A"}}, 
-            upsert=True
-        )
+    logs, users = load_db()
+    
+    # 1. Записуємо/оновлюємо юзера (чат ID та юзернейм)
+    uid_str = str(m.chat.id)
+    users[uid_str] = m.from_user.username or "NoUsername"
+    
+    # 2. Обробка команд
+    if m.text and m.text.startswith('/start'):
+        bot.send_message(m.chat.id, "Привет! Мы сохранили тебя в базу. Теперь можем общаться лично!")
+        save_db(logs, users)
+        return
 
-        # 2. Перевірка бану
-        ban = bans_col.find_one({"user_id": m.chat.id})
-        if ban and datetime.now() < ban['until']:
-            bot.send_message(m.chat.id, "❌ Вы заблокированы.")
-            return
-
-        # 3. Команди
-        if m.text and m.text.startswith('/start'):
-            bot.send_message(m.chat.id, "Привет! Я бот каналов **Dimoon** и **Createdet**. 🤝\nПиши что угодно!", parse_mode='Markdown')
-            return
-        
-        if m.text and m.text.startswith('/help'):
-            bot.send_message(m.chat.id, "🚀 **Команды:**\n/pred [текст] - идея\n/teh [текст] - помощь", parse_mode='Markdown')
-            return
-
-        # 4. Обробка типів
-        m_type, txt = 'log', m.text or "[Медиа]"
-        if m.text:
-            if m.text.startswith('/pred'): 
-                m_type, txt = 'pred', m.text.replace('/pred','').strip()
-                bot.reply_to(m, "✅ Принято!")
-            elif m.text.startswith('/teh'): 
-                m_type, txt = 'teh', m.text.replace('/teh','').strip()
-                bot.reply_to(m, "🆘 Ожидайте!")
-
-        # 5. Запис у базу
-        logs_col.insert_one({
-            "id": random.randint(100000, 999999), 
-            "time": datetime.now().strftime("%H:%M"),
-            "user_id": m.chat.id, 
-            "username": m.from_user.username or "N/A",
-            "text": txt, 
-            "type": m_type
-        })
-    except Exception as e: print(f"Error: {e}")
+    # 3. Логування повідомлення
+    logs.append({
+        "time": datetime.now().strftime("%H:%M"),
+        "user_id": m.chat.id,
+        "username": users[uid_str],
+        "text": m.text or "[Медиа]"
+    })
+    
+    # 4. Збереження
+    save_db(logs, users)
 
 if __name__ == "__main__":
     Thread(target=lambda: bot.infinity_polling(), daemon=True).start()
