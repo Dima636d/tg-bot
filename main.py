@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 # --- НАЛАШТУВАННЯ ---
 TOKEN = os.environ.get('BOT_TOKEN')
 MONGO_URL = os.environ.get('MONGO_URL') 
-ADMIN_PASSWORD = "A131@Y&"
+ADMIN_PASSWORD = "os.environ.get('Adminp')"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
